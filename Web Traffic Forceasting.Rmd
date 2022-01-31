@@ -1,0 +1,330 @@
+---
+title: "Web traffic forcasting"
+output: html_document
+---
+### Web Traffic Forecasting
+#### ALISHMA BHARDWAJ 
+
+```{r echo=FALSE}
+library(data.table) # CSV file I/O and efficiently working with large data
+library(ggplot2) # Data visualization
+library(ggthemes)
+library(forecast)
+library(tseries)
+library(data.table)
+library(dplyr)
+library(tidyr) # data manipulation
+library(stringr)
+library(plotly)
+library(parallel)
+```
+```{r}
+dt_org <- fread('train_1.csv',header = TRUE, data.table = TRUE, na.strings=c("NA","?", ""))
+head(dt_org,10)
+```
+
+```{r}
+str(dt_org)
+```
+```{r}
+dim(dt_org)
+```
+```{r}
+### sampled the train data to 1/10
+
+set.seed(1234)
+sample_wiki <- dt_org %>%
+  sample_frac(0.1) %>%
+  gather(Date, Visit, -Page) %>% data.table
+
+```
+```{r}
+dim(sample_wiki)
+```
+```{r}
+### NA values
+sapply(sample_wiki, function(x)sum(is.na(x)))
+```
+### mclapply is a parallelized version of lapply, it returns a list of the same length as X, each element of which is the result of applying FUN to the corresponding element of X.
+
+```{r}
+### 0 values
+sapply(sample_wiki, function(x) sum(x == 0,na.rm = T))
+```
+```{r}
+### '_' in the names
+sum(sapply(sample_wiki$Page[1:100000], function(x) str_count(x,pattern = "_")) == 3)
+```
+```{r}
+###  Extract name, project, access, agent from Page
+
+name = mclapply(str_split(sample_wiki$Page,pattern = "_"),function(x) head(x,length(x)-3))
+
+name = mclapply(name, function(x) paste(x,collapse = ' '))
+
+page_split <- mclapply(str_split(sample_wiki$Page,pattern = "_"),function(x) tail(x,3)) 
+
+add <- data.table(Project= unlist(mclapply(page_split, function(x) x[1])),
+                  Access= unlist(mclapply(page_split, function(x) x[2])),
+                  Agent= unlist(mclapply(page_split, function(x) x[3])),
+                  Name = unlist(name))
+```
+```{r}
+### Adding the new fields to the data set columnwise
+sample_wiki <- cbind(sample_wiki, add)
+head(sample_wiki,10)[,-1]
+```
+```{r}
+### Checking missing values in projects
+table(sample_wiki[is.na(Visit), Project])
+```
+```{r}
+### Replacing NAs
+sample_wiki <- replace_na(sample_wiki,list(Visit = 0))
+head(sample_wiki,10)
+```
+```{r}
+
+### Date format
+sample_wiki <- sample_wiki %>% 
+mutate(Date = as.Date(Date,format="%Y-%m-%d"),
+       Year = year(Date),
+       Month = month(Date),
+       Visit_m = Visit/1000000)
+
+head(sample_wiki,10)
+```
+```{r}
+### Statistics
+summary(sample_wiki)
+```
+```{r}
+### plots
+
+```
+```{r}
+### Visualization
+#### We will start by visualizing the total number of visits to all wikipedia sites per day regardless of Project, Agent or Access type.
+
+# DATE
+
+p_base <- sample_wiki %>%
+  group_by(Date) %>%
+  summarise(Visit_m = sum(Visit_m)) %>%
+  ggplot(aes(Date, Visit_m)) +
+  geom_line() + 
+  theme_classic(base_size = 12,base_family = 'mono') + 
+  ylab('Visit in Millions') + ggtitle('Daily Traffic')
+ggplotly(p_base)
+```
+```{r}
+# MONTH
+p_month <- sample_wiki %>%
+  mutate(year_month = format(Date, "%Y-%m")) %>%
+  group_by(year_month, Project) %>%
+  summarise(Visit = mean(Visit)) %>%
+  ggplot(aes(year_month, Visit)) + 
+  geom_bar(stat = 'identity', aes(fill = Project)) + 
+  theme_classic(base_size = 12,base_family = 'mono')+
+  ylab('Number of Visits') + xlab('Year - Month') + ggtitle('Average Monthly Traffic')
+
+ggplotly(p_month)
+```
+```{r}
+# PROJECT WISE
+p_proj <- sample_wiki %>%
+  group_by(Date,Project) %>%
+  summarise(Visit_m = sum(Visit_m)) %>%
+  ggplot(aes(Date, Visit_m)) + 
+  geom_line(aes(color = Project), size = 0.3) + 
+  # facet_grid(~Project,scales = 'free_y',shrink = F) + 
+  theme_classic(base_size = 12,base_family = 'mono') +
+  theme(legend.position = 'top') +
+  ylab('Visit in Millions')
+ggplotly(p_proj)
+```
+```{r}
+## ACCESS
+p_access <- sample_wiki %>%
+  group_by(Date,Access) %>%
+  summarise(Visit_m = sum(Visit_m)) %>%
+  ggplot(aes(Date, Visit_m)) + 
+  geom_line(aes(color = Access)) + 
+  theme_classic(base_size = 12,base_family = 'mono') + ylab('Visit in Millions')
+ggplotly(p_access)
+```
+```{r}
+###AGENTS
+
+p_agent <- sample_wiki %>%
+  group_by(Date,Agent) %>%
+  summarise(Visit_m = sum(Visit_m)) %>%
+  ggplot(aes(Date, Visit_m)) + 
+  geom_line(aes(color = Agent))+ 
+  theme_classic(base_size = 12,base_family = 'mono') + ylab('Visit in Millions')
+ggplotly(p_agent)
+```
+```{r}
+### Selecting only top 1% of the data projectwise
+top_1_proj <- sample_wiki %>%
+  group_by(Project, Name) %>%
+  summarise(Visit = sum(Visit)) %>%
+  top_n(1, Visit) %>% data.table
+top_1_proj
+```
+```{r}
+### Top pprojects for the year
+# summarize by project and year, top 1
+top_1_proj_yr <- sample_wiki %>%
+  group_by(Project, Year, Name) %>%
+  summarise(Visit = sum(Visit)) %>%
+  top_n(1, Visit) %>%
+  spread(Year,Visit) %>% data.table
+top_1_proj_yr
+```
+```{r}
+### YEAR 2015 AD 16
+
+sample<-sample_wiki %>% 
+  group_by(Project, Year, Name) %>%
+  summarise(Visit = sum(Visit)) %>% data.table
+
+wiki <- sample[grepl('en',Project) & !grepl(Name,pattern = c('Special:'))]
+wiki_15 <- wiki[Year == 2015]
+wiki_16 <- wiki[Year == 2016]
+```
+```{r}
+### top in 2015 # time trend by the top phrases
+
+top_10_en_15 <- top_n(wiki_15, 10,Visit) %>% select(Name)
+sample_wiki %>% 
+  filter(Name %in% top_10_en_15$Name,
+         Year == 2015) %>%
+  ggplot() + 
+  geom_bar(aes(x= Date,y = Visit_m), stat = 'identity', fill = 'red',alpha = 0.7) +
+  facet_wrap(~Name, scales = 'fixed',nrow = 5) +
+  theme_classic(base_size = 12,base_family = 'mono') + ylab('Visit in Millions') +
+  ggtitle('Top 10 Visited Pages in 2015')
+```
+```{r}
+### TOP IN 2016
+top_10_en_16 <- top_n(wiki_16, 10,Visit) %>% select(Name)
+# time trend by the top phrases
+sample_wiki %>% 
+  filter(Name %in% top_10_en_16$Name,
+         Year == 2016) %>%
+  ggplot() + 
+  geom_bar(aes(x= Date,y = Visit_m), fill = 'red', alpha = 0.7, stat = 'identity') +
+  facet_wrap(~Name, scales = 'free_y', nrow = 5) +
+  theme_classic(base_size = 12,base_family = 'mono') + ylab('Visit in Millions') +
+  ggtitle('Top 10 Visited Pages in 2016')
+```
+
+```{r echo=FALSE}
+require(data.table)
+require(TSA)
+require(forecast)
+```
+
+```{r}
+train <-fread('train_1.csv',header = TRUE, data.table = TRUE, na.strings=c("NA","?", ""))
+```
+
+```{r}
+x <- unlist(train[Page=="Eminem_en.wikipedia.org_desktop_all-agents", -1])
+x <- tsclean(x)
+```
+
+```{r}
+pacf(x)
+acf(x)
+```
+
+
+```{r}
+ndiffs(x)
+p <- periodogram(x)
+
+data.table(period=1/p$freq, spec=p$spec)[order(-spec)][1:2]
+```
+```{r}
+dim(x)
+
+# Train set
+y <- ts(x[1:490])
+
+# Test set
+y.te <- x[491:550]
+```
+```{r}
+
+# Base model
+fit0 <- auto.arima(y)
+(bestfit <- list(aicc=fit0$aicc, i=0, j=0, fit=fit0))
+
+fc0 <- forecast(fit0, h=60)
+plot(fc0)
+```
+
+
+
+```{r}
+# Choose the best model by AICc
+for(i in 1:3) {
+  for (j in 1:3){
+    z1 <- fourier(ts(y, frequency=576), K=i)
+    z2 <- fourier(ts(y, frequency=192), K=j)
+    fit1<-auto.arima(y, xreg=z1, seasonal=F)
+    fit3<-fit1
+    fit2<-auto.arima(y, xreg=z2, seasonal=F)
+    if(fit1$aicc < fit2$aicc){
+      fit3<-fit1
+    }else{
+      fir3<-fit2
+    }
+    if(fit3$aicc < bestfit$aicc) {
+      bestfit <- list(aicc=fit3$aicc, i=i, j=j, fit=fit3)
+    }
+  }
+}
+
+bestfit
+```
+```{r}
+fc <- forecast(bestfit$fit, 
+              xreg=cbind(
+               fourier(ts(y, frequency=576), K=bestfit$i, h=60),
+                fourier(ts(y, frequency=192), K=bestfit$j, h=60)))
+plot(fc)
+```
+```{r}
+fc.tbats <- forecast(tbats(y, seasonal.periods=c(576,192)), h=60)
+plot(fc.tbats)
+```
+
+```{r}
+mape <- function(act, fc){
+  pred <- as.vector(fc$mean)
+  mean(abs((act-pred)/abs(act))) * 100
+}
+mape(y.te, fc0)
+mape(y.te, fc)
+mape(y.te, fc.tbats)
+```
+
+```{r}
+plot(as.ts(x))
+```
+
+```{r}
+plot(fc0)
+```
+
+```{r}
+plot(fc)
+```
+
+```{r}
+plot(fc.tbats)
+```
+
