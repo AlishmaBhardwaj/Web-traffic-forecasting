@@ -6,4 +6,6 @@ Nowadays, web traffic forecasting is a major problem as this can cause setbacks 
 
 ### Dataset 
 The training dataset consists of approximately 145k time series. Each of these time series represent a number of daily views of a different Wikipedia article, starting from nearly 2 years, 2015-2017.
+
 Source: Kaggle
+https://www.kaggle.com/c/web-traffic-time-series-forecasting/data
